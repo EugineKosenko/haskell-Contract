@@ -1,0 +1,1334 @@
+#+title: Программирование по контракту в Haskell
+#+PROPERTY: header-args :exports both :mkdirp yes
+
+Контракты --- техника, которая сводится к "тестированию на лету". В основу контрактов для =C/C++=
+положена проверка логических /утверждений/ (/Assert/), реализованная в виде макроса ~assert~. Этот макрос
+аварийно завершает приложение, если заданное им утверждение не соблюдается (то есть, ложно). Для
+=Haskell= аналогичная возможность предоставлена в виде функции ~assert~, реализованной в модуле
+[[https://hackage.haskell.org/package/base-4.16.0.0/docs/Control-Exception.html][Control.Exception]]. Однако в целом программирование по контракту не сводится только к утверждениям в
+отдельных местах приложения. Полноценные контракты, реализованные, например, в =Eiffel=, являются
+регулярной системой проверок, которые задаются в описании поведения любой достаточно сложной
+функции. Поэтому кроме простых /проверок/ (/Check/), которые являются дальнейшим развитием утверждений и
+могут встретиться в любом месте кода, вводятся также /требования/ (/Requirement/), /гарантии/ (Ensurance)
+и /инварианты/ (/Invariant/). Требования можно также назвать /предусловиями/ (/Precondition/), а гарантии
+--- /постусловиями/ (/Postcondition/). Предусловия проверяются перед вызовом функции, постусловия --- в
+конце, а инварианты вызываются в обоих случаях. Совокупность требований, гарантий и инвариантов обычно
+называется /контрактом/, который определяет порядок взаимодействия функции с внешним миром.
+
+Кроме того, с программированием по контракту тесно связаны различные способы аварийного завершения
+приложения. В =C= для аварийного завершения обычно используется вызов функции ~exit~, в =C++= к этому
+механизму добавляется /генерация исключений/ (/Exception/) с помощью синтаксической конструкции
+~throw~. При этом функция ~exit~ просто завершает исполнение приложения, а при генерации исключения можно
+дополнительно описать возникшую аварийную ситуацию. В =Haskell= так же, как и в =C++=, для аварийного
+завершения используется генерация исключения. Неопределенное поведение отмечается вызовом функции
+~undefined~, а для генерации исключения в аварийной ситуации --- функция ~error~. При этом, однако,
+механизмы аварийного завершения в =C/C++= и стандартном =Haskell= не связаны тесно с системой контрактов,
+что будет продемонстрировано далее.
+
+Таким образом, при реализации =Haskell=-модуля ~Contract~ ставились следующие задачи:
+
+- реализация полноценной системы контрактов по образцу, который предоставлен в =Eiffel=;
+
+- реализация удобных способов аварийного завершения приложения, как части системы контрактов.
+
+* Основные понятия, требования, примеры и мотивация
+  :PROPERTIES:
+  :ID:       3bd28899-65f2-421a-8187-7abf61208b2a
+  :END:
+
+** Аварийные ситуации
+:PROPERTIES:
+:ID:       e60ea409-eb29-4f67-ba5a-2f927bbece19
+:END:
+
+Назовем /аварийной ситуацией/ или просто /аварией/ (/Alert/) любую генерацию исключения, которое, как
+правило, не обрабатывается и приводит к аварийному завершению приложения. В отличие от других типов
+исключительного поведения аварийная ситуация обычно вызвана логической ошибкой в коде приложения. Поэтому
+исключения, генерируемые в аварийной ситуации, желательно выделить в особый тип. В стандартном =Haskell=
+для индикации аварийной ситуации используется сразу два типа исключений --- функция ~error~ генерирует
+исключение ~ErrorCall~, а функция ~assert~ --- исключение ~AssertionFailed~. Возможно, предполагается,
+что такое отличие должно как-то помочь при обработке этих исключений. Но мы уже договорились, что
+исключение в аварийной ситуации не обрабатывается. В таком случае намного важнее /сообщение/ (/Message/,
+~Msg~) --- строка, содержащая краткое описание аварии. И ~ErrorCall~ и ~AssertionFailed~ содержат
+сообщение в виде простой текстовой строки, однако тип этих исключений совершенно не влияет на текст
+сообщения:
+
+#+begin_src haskell :results none
+  :m +Control.Exception
+#+end_src
+
+#+begin_src haskell
+  throw $ ErrorCall "Alarm"
+#+end_src
+
+#+RESULTS:
+: *** Exception: Alarm
+
+#+begin_src haskell
+  throw $ AssertionFailed "Alarm"
+#+end_src
+
+#+RESULTS:
+: *** Exception: Alarm
+
+В обоих случаях система использует один и тот же заголовок ~*** Exception:~. Наверное, было бы разумно
+вместо абстрактного заголовка ~Exception~ [[id:87e5d625-fe0b-4841-a496-f67ec2c34e2f][выводить конкретный тип исключения]].
+
+В настоящее время тип исключения для аварийной ситуации вообще не играет никакой роли. Чтобы определить
+сообщение в аварийной ситуации, годится даже простая строка, достаточно только определить ее как
+экземпляр класса ~Exception~.
+
+<<Пример 1>>Пример 1
+#+begin_src haskell :tangle sample/Contract.1.hs :exports code
+  {-# LANGUAGE FlexibleInstances, TypeSynonymInstances #-}
+
+  import Control.Exception(Exception)
+    
+  instance Exception String
+#+end_src
+
+#+begin_src haskell :results verbatim
+  :load Contract/sample/Contract.1
+#+end_src
+
+#+RESULTS:
+: [1 of 1] Compiling Main             ( Contract/sample/Contract.1.hs, interpreted )
+: Ok, one module loaded.
+
+#+begin_src haskell
+  throw "Alarm"
+#+end_src
+
+#+RESULTS:
+: *** Exception: "Alarm"
+
+При реализации контрактов я вначале для простоты использовал исключение ~ErrorCall~, которое порождается
+вызовом функции ~error~. Однако при [[id:c855033f-60fb-43a2-b9fb-6561ee890fde][тестировании аварийных ситуаций]] оказалось полезным отделить
+исключения, порождаемые системой контрактов, от аналогичных стандартных исключений. Поэтому был определен
+особый тип исключений ~Alert~ который и генерируется системой при возникновении аварийной ситуации.
+
+** Обнаружение аварийной ситуации
+   :PROPERTIES:
+   :ID:       e2b973cc-22d5-491c-8539-b0c11f6ff29b
+   :END:
+  
+Иногда аварийная ситуация означает невозможность выполнить корректные действия в сложившихся условиях. Рассмотрим,
+например, следующую реализацию функции ~next~:
+
+<<Пример 2>>Пример 2
+#+begin_src haskell -n -l "(ref:%s)" :exports code :tangle sample/Contract.2.hs
+  next v =
+      if v < 0
+      then undefined                                         -- (ref:not-important)
+      else if v == 1 
+           then 2
+           else if v == 2 
+                then 3
+                else undefined                               -- (ref:not-discovered)
+#+end_src
+
+#+begin_src haskell :results verbatim
+  :load Contract/sample/Contract.2
+#+end_src
+
+#+RESULTS:
+: [1 of 1] Compiling Main             ( Contract/sample/Contract.2.hs, interpreted )
+: Ok, one module loaded.
+
+По сути, эта функция должна выдавать следующее значение для своего аргумента. Однако предположим, что
+функция ~next~ определена частично, только для значений ~1~ и ~2~. В остальных случаях поведение функции
+либо не важно для нас (как в строке [[(not-important)]], либо мы не можем определить поведение функции для
+такого значения (как в строке [[(not-discovered)]]. Эти ситуации помечены коде стандартным вызовом
+~undefined~. Теперь вызов частично определенной функции ~next~ с недопустимым аргументом приведет к
+возникновению аварийной ситуации:
+
+#+begin_src haskell
+  next (-1)
+#+end_src
+
+#+RESULTS:
+: *** Exception: Prelude.undefined
+: CallStack (from HasCallStack):
+:   error, called at libraries/base/GHC/Err.hs:79:14 in base:GHC.Err
+:   undefined, called at Contract/sample/Contract.2.hs:3:10 in main:Main
+
+#+begin_src haskell
+  next 0
+#+end_src
+
+#+RESULTS:
+: *** Exception: Prelude.undefined
+: CallStack (from HasCallStack):
+:   error, called at libraries/base/GHC/Err.hs:79:14 in base:GHC.Err
+:   undefined, called at Contract/sample/Contract.2.hs:8:20 in main:Main
+
+Мы видим, что в случае возникновения аварийной ситуации само сообщение ~*** Exception: Prelude.undefined~
+совершенно неинформативно. Оно только сообщает, что где-то в коде была вызвана функция ~undefined~, но
+где произошел этот вызов, и почему --- непонятно. В прежних реализациях =GHC= больше ничего не было
+известно. Сейчас система при аварийном завершении показывает стек вызова, что позволяет определить, хотя
+бы, место аварии.
+
+Чтобы понять, насколько лучше может быть результат, воспользуемся, например, определением функции ~next~
+по образцу:
+
+<<Пример 3>>Пример 3
+#+begin_src haskell -n -l "(ref:%s)" :exports code :tangle sample/Contract.3.hs
+  next 1 = 2
+  next 2 = 3
+#+end_src
+
+#+begin_src haskell :results verbatim
+  :load Contract/sample/Contract.3
+#+end_src
+
+#+RESULTS:
+: [1 of 1] Compiling Main             ( Contract/sample/Contract.3.hs, interpreted )
+: Ok, one module loaded.
+
+#+begin_src haskell
+  next (-1)
+#+end_src
+
+#+RESULTS:
+: *** Exception: Contract/sample/Contract.3.hs:(1,1)-(2,10): Non-exhaustive patterns in function next
+
+#+begin_src haskell
+  next 0
+#+end_src
+
+#+RESULTS:
+: <interactive>:1258:1-4: error:
+:     Variable not in scope: next :: t0 -> t
+
+Здесь мы тоже получаем аварийную ситуацию, описанную исключением. Удивительно, но здесь, в отличие от
+вызова ~undefined~, не показан стек вызова. Вместо этого в тексте сообщения появляется фрагмент
+~Contract/sample/Contract.3.hs:(1,1)-(2,10)~, описывающая место в исходном коде, где возникла
+ошибка. Такое описание будем называть /положением/ (/Location/, /Locus/, ~Loc~) аварийной
+ситуации. Положение может быть описано в виде структуры [[https://hackage.haskell.org/package/template-haskell-2.8.0.0/docs/Language-Haskell-TH-Syntax.html#t:Loc][Loc]] из модуля ~Language.Haskell.TH~, при этом для
+наших целей удобно представлять его в виде отформатированной строки. Приведенный текстовый формат
+упрощает переход к месту аварии в исходном коде с помощью средств =Emacs=, поэтому постараемся
+использовать его в сообщении для любой аварийной ситуации.
+
+Заметим, что даже определение функции ~next~ по образцу не позволяет нам различить два важных для нас
+случая. Попробуем исправить этот недостаток:
+
+<<Пример 4>>Пример 4
+#+begin_src haskell -n -l "-- (ref:%s)" :exports code :tangle sample/Contract.4.hs
+  next v =
+    if v < 0
+    then error ("next for " ++ show v ++ " is not defined")
+    else if v == 1 
+         then 2
+         else if v == 2 
+              then 3
+              else error ("Unexpected value " ++ show v)
+#+end_src
+
+#+begin_src haskell :results verbatim
+  :load Contract/sample/Contract.4.hs
+#+end_src
+
+#+RESULTS:
+: [1 of 1] Compiling Main             ( Contract/sample/Contract.4.hs, interpreted )
+: Ok, one module loaded.
+
+#+begin_src haskell
+  next (-1)
+#+end_src
+
+#+RESULTS:
+: *** Exception: next for -1 is not defined
+: CallStack (from HasCallStack):
+:   error, called at Contract/sample/Contract.4.hs:3:8 in main:Main
+
+#+begin_src haskell
+  next 0
+#+end_src
+
+#+RESULTS:
+: *** Exception: Unexpected value 0
+: CallStack (from HasCallStack):
+:   error, called at Contract/sample/Contract.4.hs:8:18 in main:Main
+
+Здесь мы попытались разделить ситуации, задав для каждой из них свой собственный вид сообщения с помощью
+вызова стандартной функции ~error~ из модуля [[https://downloads.haskell.org/~ghc/8.0.1-rc1/docs/html/libraries/base-4.9.0.0/src/GHC-Err.html][Err]]. Раньше эта функция просто генерировала исключение
+~ErrorCall~:
+
+#+begin_src haskell :exports code
+  error :: [Char] -> a
+  error s = throw (ErrorCall s)
+#+end_src
+
+При такой реализации функция ~error~ не имеет большого смысла. В самом деле, как уже было указано раньше,
+мы могли бы [[Пример 1][определить строки как разновидность исключений]], после чего просто генерировать исключения
+напрямую. Однако новая реализация функции ~error~ сложнее, так как в нее добавлен стек вызова. Заметим,
+что ~undefined~ сейчас тоже реализован как специальный вызов ~error~.
+
+Очевидно, что реализация функции ~error~ была бы лучше, если бы к заданному сообщению автоматически
+добавлялось положение аварийной ситуации, как это сделано для неполного определения по образцу. Тогда
+сообщения об ошибке выглядели бы, например, так:
+
+: *** Exception: Contract/sample/Contract.4.hs:(3,8)-(3,57): next for -1 is not defined
+
+для первой ситуации и
+
+: *** Exception: Contract/sample/Contract.4.hs:(8,18)-(8,48): Unexpected value 0
+
+для второй.
+
+Вместо того, чтобы изменять определение стандартной функции ~error~, поведение которой для многих уже
+стало привычным, при реализации модуля ~Contract~ мы определим новую функцию ~alert~, которая отличается от
+~error~ тем, что включает в сообщение специально отформатированную информацию о положении аварийной
+ситуации. Позднее можно будет [[id:508a8a18-bcda-4507-99dc-a757504f702c][добавить в ~alert~ стек вызова]].
+
+** Утверждения
+:PROPERTIES:
+:ID:       4f516ce1-a547-46f5-ac01-fc0f06f0a93b
+:END:
+
+Во многих случаях желательно проверить возможность возникновения аварийной ситуации еще до того, как она
+реально возникнет. Как правило, это необходимо сделать при вычислении любой частично определенной
+функции. Возьмем в качестве примера функцию ~sqrtHead~, которая вычисляет квадратный корень из первого
+элемента списка.
+
+#+begin_src haskell
+  let sqrtHead = sqrt . head
+  :type sqrtHead
+#+end_src
+
+#+RESULTS:
+: sqrtHead :: Floating c => [c] -> c
+
+Эта функция частично определена, так как попытка применить ее к пустому списку также приводит к аварийной
+ситуации:
+
+#+begin_src haskell
+  sqrtHead []
+#+end_src
+
+#+RESULTS:
+: *** Exception: Prelude.head: empty list
+
+Здесь мы опять видим старый формат вывода сообщений, без указания положения аварии и стека вызова. И если
+для функций ~error~ и ~undefined~ разработчики добавили, хотя бы, стек вызова, то в этом случае
+стандартная библиотека не включила стек вызова в описание аварии. А ведь в коде реального приложения
+могут быть сотни мест, где может возникнуть аналогичная проблема, и причины аварии из текста сообщения
+совершенно непонятны. Пример отладки в таком случае описан, например, в [[https://donsbot.wordpress.com/2007/11/14/no-more-exceptions-debugging-haskell-code-with-ghci/][этой статье]].
+
+Еще одна аварийная ситуация может возникнуть, если список не пуст, но его первый элемент меньше нуля:
+
+#+begin_src haskell
+  sqrtHead [-5.0]
+#+end_src
+
+#+RESULTS:
+: NaN
+
+Еще хуже обработка ситуации с извлечением корня из отрицательного числа: функция тихо возвращает
+бесполезное значение, не вызывая аварийной ситуации. При этом выполнение приложения продолжается и
+некорректность вычисленного значения может быть обнаружена очень далеко от места, где реально возникла
+ошибка.
+
+Очевидно, что обе ситуации желательно проверить явно, например, так:
+
+<<Пример 5>>Пример 5
+#+begin_src haskell -n -l "-- (ref:%s)" :exports code :tangle sample/Contract.5.hs
+  sqrtHead [] = error "Argument list in sqrtHead is empty"
+  sqrtHead (v:_) = 
+    if v < 0
+    then error ("Head element " ++ show v ++ " of argument list in sqrtHead is negative")
+    else sqrt v
+#+end_src
+
+#+begin_src haskell :results verbatim
+  :load Contract/sample/Contract.5.hs
+#+end_src
+
+#+RESULTS:
+: [1 of 1] Compiling Main             ( Contract/sample/Contract.5.hs, interpreted )
+: Ok, one module loaded.
+
+#+begin_src haskell
+  sqrtHead []
+#+end_src
+
+#+RESULTS:
+: *** Exception: Argument list in sqrtHead is empty
+: CallStack (from HasCallStack):
+:   error, called at Contract/sample/Contract.5.hs:1:15 in main:Main
+
+#+begin_src haskell
+  sqrtHead [-5.0]
+#+end_src
+
+#+RESULTS:
+: *** Exception: Head element -5.0 of argument list in sqrtHead is negative
+: CallStack (from HasCallStack):
+:   error, called at Contract/sample/Contract.5.hs:4:8 in main:Main
+
+Здесь проверки аварийных ситуаций запутывают основной код приложения. Чтобы упростить описание,
+воспользуемся /утверждениями/ (/Assert/), которые реализованы в =Haskell= в виде стандартной функции
+[[https://hackage.haskell.org/package/base-4.16.0.0/docs/Control-Exception.html#g:14][assert]], реализованной в модуле ~Control.Exception~ (а также, как это ни странно, в модуле
+[[https://hackage.haskell.org/package/base-4.3.1.0/docs/Control-OldException.html#v:assert][Control.OldException]]).
+
+<<Пример 6>>Пример 6
+#+begin_src haskell -n -l "-- (ref:%s)" :exports code :tangle sample/Contract.6.hs
+  import Control.Exception
+  
+  sqrtHead l = 
+    assert (not $ null l)
+    assert (head l >= 0)
+    sqrt $ head l
+#+end_src
+
+#+begin_src haskell :results verbatim
+  :load Contract/sample/Contract.6.hs
+#+end_src
+
+#+RESULTS:
+: [1 of 1] Compiling Main             ( Contract/sample/Contract.6.hs, interpreted )
+: Ok, one module loaded.
+
+#+begin_src haskell
+  sqrtHead []
+#+end_src
+
+#+RESULTS:
+: *** Exception: Assertion failed
+: CallStack (from HasCallStack):
+:   assert, called at Contract/sample/Contract.6.hs:4:3 in main:Main
+
+#+begin_src haskell
+  sqrtHead [-5.0]
+#+end_src
+
+#+RESULTS:
+: *** Exception: Assertion failed
+: CallStack (from HasCallStack):
+:   assert, called at Contract/sample/Contract.6.hs:5:3 in main:Main
+
+Логическое выражение, заданное в утверждении назовем /условием/ (/Condition/, ~Cond~). Значения
+аргументов, при которых условие утверждения корректно (или /удовлетворено/), назовем /областью
+утверждения/ (/Assertion Domain/). Смысл вызова для утверждения очень прост: если условие утверждения
+/нарушено/ (то есть, его значение ложно), то возникает аварийная ситуация, в противном случае вычисляется
+оставшаяся часть утверждения, которую будем называть /продолжением/ (/Continuation/, ~Cont~). Описанный
+процесс будем называть коротко /исполнением утверждения/ (/Assertion Execution/). Заметим, что
+продолжение --- это (как правило, частично определенная) функция, имеющая свою собственную область
+определения (/Continuation Domain/). Область правильно заданного утверждения всегда является
+подмножеством области определения продолжения. Очень важно, что *область утверждения не всегда равна
+области определения продолжения* и может быть его строгим подмножеством. То есть, утверждение может
+превратить даже тотально определенную функцию продолжения в частично определенную или уменьшить область
+определения функции-продолжения.
+
+В отличие от ~error~ функция ~assert~ возвращает совершенно неинформативное сообщение о причинах
+аварийной ситуации. Само сообщение ~Assertion failed~ "жестко прошито" в реализации функции
+~assert~. Было бы удобнее, если бы в сообщение утверждения включался, хотя бы, текст проверенного
+условия, например,
+
+: *** Exception: sample\Contract-6.hs:5:3-8: "Argument list in sqrtHead is not empty" failed
+
+для первой ситуации и
+
+: *** Exception: sample\Contract-6.hs:7:3-8: "Head element -5.0 of argument list in sqrtHead is not negative" failed
+
+для второй. Такое описание, по идее, должно передаваться как аргумент утверждения, например, так:
+
+#+begin_src haskell :exports code
+  sqrtHead l = 
+    assert "Argument list in sqrtHead is not empty" (not $ null l)
+    assert ("Head element " ++ (show $ head l) ++ " of argument list in sqrtHead is negative") (head l >= 0)
+    sqrt $ head l
+#+end_src
+
+Попытка найти реализацию функции ~assert~ в исходных текстах GHC приводит к потрясающим
+результатам. Оказывается, в компиляторе Haskell используется несколько различных систем проверки
+утверждений. Например, раньше в модуле ~Control.Exception.Base~ использовалась наиболее очевидная
+реализация:
+
+#+begin_src haskell :exports code
+  #if !(__GLASGOW_HASKELL__ || __NHC__)
+  assert :: Bool -> a -> a
+  assert True x = x
+  assert False _ = throw (AssertionFailed "")
+  #endif
+#+end_src
+
+Занятно, что тут нет "магической" фразы ~Assertion Failed~, а сам вызов этой функции выдает пустое
+сообщение, даже без информации о месте возникновения ошибки. Сейчас эта реализация убрана, и вместо нее
+приведена не менее загадочная реализация в модуле ~GHC.Base~:
+
+#+begin_src haskell :exports code
+  -- Assertion function.  This simply ignores its boolean argument.
+  -- The compiler may rewrite it to @('assertError' line)@.
+
+  -- | If the first argument evaluates to 'True', then the result is the
+  -- second argument.  Otherwise an 'Control.Exception.AssertionFailed' exception
+  -- is raised, containing a 'String' with the source file and line number of the
+  -- call to 'assert'.
+  --
+  -- Assertions can normally be turned on or off with a compiler flag
+  -- (for GHC, assertions are normally on unless optimisation is turned on
+  -- with @-O@ or the @-fignore-asserts@
+  -- option is given).  When assertions are turned off, the first
+  -- argument to 'assert' is ignored, and the second argument is
+  -- returned as the result.
+
+  --      SLPJ: in 5.04 etc 'assert' is in GHC.Prim,
+  --      but from Template Haskell onwards it's simply
+  --      defined here in Base.hs
+  assert :: Bool -> a -> a
+  assert _pred r = r
+#+end_src
+
+Попытка же найти исходных текстах GHC фразу ~Assertion Failed~ дает, например, вот такое определение в
+модуле ~GHC.IO.Exception~:
+
+#+begin_src haskell :exports code
+  assertError :: Addr# -> Bool -> a -> a
+  assertError str predicate v
+    | predicate = v
+    | otherwise = throw (AssertionFailed (untangle str "Assertion failed"))
+#+end_src
+
+В этом определении передается дополнительный параметр, который и задает положение утверждения в виде
+адреса строки C в памяти. Об этом говорится в разделе [[https://downloads.haskell.org/~ghc/6.12.2/docs/html/users_guide/assertions.html][7.12. Assertions]] руководства пользователя. Там
+сказано:
+
+#+begin_quote
+Ghc will rewrite this to also include the source location where the assertion was made,
+
+assert pred val ==> assertError "Main.hs|15" pred val
+
+The rewrite is only performed by the compiler when it spots applications of Control.Exception.assert, so
+you can still define and use your own versions of assert, should you so wish. If not, import
+Control.Exception to make use assert in your code.
+#+end_quote
+
+Получается, что реализация ~assert~ сделана с помощью хака в компиляторе, который предоставляет этой
+функции особую информацию о положении утверждения. Возможно, такая "грязная" реализация стала причиной
+того, что ее не используют регулярно, в том числе, для генерации исключений вообще и аварийных ситуаций,
+в частности.
+
+Наконец, очень интересен вариант, определенный в файле [[https://gitlab.haskell.org/ghc/ghc/-/blob/4ba73e00c4887b58d85131601a15d00608acaa60/compiler/HsVersions.h][HsVersions.h]]:
+
+#+begin_src haskell :exports code
+  #define ASSERT(e)      if debugIsOn && not (e) then (assertPanic __FILE__ __LINE__) else
+  #define ASSERT2(e,msg) if debugIsOn && not (e) then (assertPprPanic __FILE__ __LINE__ (msg)) else
+  #define WARN( e, msg ) (warnPprTrace (e) __FILE__ __LINE__ (msg)) $
+
+  -- Examples:   Assuming   flagSet :: String -> m Bool
+  --
+  --    do { c   <- getChar; MASSERT( isUpper c ); ... }
+  --    do { c   <- getChar; MASSERT2( isUpper c, text "Bad" ); ... }
+  --    do { str <- getStr;  ASSERTM( flagSet str ); .. }
+  --    do { str <- getStr;  ASSERTM2( flagSet str, text "Bad" ); .. }
+  --    do { str <- getStr;  WARNM2( flagSet str, text "Flag is set" ); .. }
+  #define MASSERT(e)      ASSERT(e) return ()
+  #define MASSERT2(e,msg) ASSERT2(e,msg) return ()
+  #define ASSERTM(e)      do { bool <- e; MASSERT(bool) }
+  #define ASSERTM2(e,msg) do { bool <- e; MASSERT2(bool,msg) }
+  #define WARNM2(e,msg)   do { bool <- e; WARN(bool, msg) return () }
+#+end_src
+
+Это очень похоже на реализацию проверок в =C/C++=, сделанную с помощью средств макропроцессора. Однако
+почему-то эти макроопределения используют не рекомендованную функцию ~assert~, а специальную функцию
+~assertPanic~, реализованную в модуле [[file:e:/cache/soft/haskell/ghc-7.0.1/compiler/utils/Panic.lhs::assertPanic%20::%20String%20->%20Int%20->%20a, реализованную в модуле [[https://downloads.haskell.org/~ghc/7.8.4/docs/html/libraries/ghc-7.8.4/Panic.html][Panic]]:
+
+#+begin_src haskell :exports code
+  assertPanic :: String -> Int -> a
+  assertPanic file line = 
+    Exception.throw (Exception.AssertionFailed 
+             ("ASSERT failed! file " ++ file ++ ", line " ++ show line))
+#+end_src
+
+Здесь мы видим еще один вид сообщений об аварийной ситуации, причем это сообщение использут особый формат
+положения.
+
+Разобраться в этом нагромождении проверочных систем мне пока что не удалось, поэтому в модуле ~Contract~
+реализована еще одна версия утверждений с описанием.
+
+** COMMENT Управление утверждениями
+   :PROPERTIES:
+   :ID:       f3936356-da7d-4f2b-aaaf-f4f36f963b31
+   :END: 
+
+При работе приложения в нормальном режиме аварийные ситуации вообще не должны возникать. Однако, если не
+принять дополнительных мер, проверка условий в рабочей версии все еще будет выполняться и влиять (иногда
+очень заметно или даже критически) на эффективность работы приложения. Просто удалить из кода приложения
+описание неэффективных утверждений неразумно, так как они могут понадобиться при необходимости продолжить
+разработку или выполнить отладку в особо запутанном случае. При "ползучей отладке" такие утверждения
+обычно помещаются в специальные комментарии или блоки условной компиляции, которые потом индивидуально
+открываются, закрываются или переключаются.
+
+Договоримся считать утверждение /включенным/ (/On/), /активным/ (/Active/) или /исполняемым/
+(/Executable/), если оно исполняется при работе приложения. Если же утверждение описано в коде, но
+помещено в комментарий или отключенный блок условной компиляции, то такое утверждение будем считать
+/выключенным/ (/Off/) или /пропущенным/ (/Skip/).
+
+Помимо возможности включать или выключать отдельные утверждения, система контрактов обычно
+предусматривает также удобную возможность /управления утверждениями/ (/Assertion Control/) --- массового
+включения и выключения утверждений в различных местах приложения. Особо заметим, что управление
+утверждениями подразумевает именно массовое включение или выключение утверждений, то есть, перевод
+системы контрактов в определенный /режим работы/ (/Contract Mode/).
+
+Управление утверждений для =C/C++= использует средства макропроцессора, который отключает проверки при
+определении специальной макропеременной-флага ~NDEBUG~. В этом случае макрос ~assert~ просто удаляет из
+кода приложения проверку условия. То есть, предоставляется два режима работы --- режим /отладки/
+(/Debug/), который включается по умолчанию, и режим /без отладки/ (/Not Debug/), который включается
+указанием флага компиляции ~-DNDEBUG~.
+
+В разделе [[https://downloads.haskell.org/~ghc/6.12.2/docs/html/users_guide/assertions.html][7.12. Assertions]] руководства пользователя =Haskell= сказано следующее:
+
+#+begin_quote
+GHC ignores assertions when optimisation is turned on with the -O flag. That is, expressions of the form
+assert pred e will be rewritten to e. You can also disable assertions using the -fignore-asserts option.
+#+end_quote
+
+То есть, здесь также предоставляется всего два режима. В обычном режиме, включенном по умолчанию,
+включены все утверждения на основе стандартной функции ~assert~. В режиме /оптимизации/ который задается
+указанием флага компиляции ~-O~ или ~-fignore-asserts~ все такие утверждения выключаются.
+
+Большой недостаток стандартной системы управления утверждениями =Haskell= в том, что она построена на
+хаке компилятора, который включает и выключает одну особую функцию в зависимости от флагов
+компиляции. Такое решение затрудняет реализацию системы контрактов, которая не зависит от конкретной
+реализации компилятора.
+
+Главное достоинство стандартных систем управления утверждениями в =C/C++= и =Haskell= --- их простота. По
+сути, предоставляется только два режима работы --- "все утверждения включены" и "все утверждения
+отключены". Кроме того, за счет раздельной компиляции модулей с разными флагами можно включать или
+выключать утверждения на уровне отдельных модулей или их групп (пакетов). Однако такой подход иногда
+недостаточно гибок. Например, даже в нормальном режиме работы желательно, чтобы приложение проверяло, как
+минимум, корректность данных, которые оно получет из базы данных, файла или любого другого потока
+вввода. Назовем такие утверждения /основными/ или /базовыми/ (/Basic/). Как правило, отключение основных
+утверждений либо не влияет существенно эффективность либо является критичным для работы всего
+приложения. Очень часто проверку входных данных вообще реализуют как часть основного кода. Кроме того,
+множество вполне полезных проверок не влияет серьезно на эффективность работы и такие проверки также
+вполне можно считать основными.
+
+Более гибкое (и в то же время, более сложное) управление утверждениями предоставляет система контрактов
+=Eiffel=, где с помощью специальных флагов компиляции можно выборочно отключить утверждения определенного
+типа (по умолчанию в =Eiffel= все утверждения включены). Например, можно выключить все постусловия,
+оставив включенными предусловия, как основную и самую важную часть контрактов. Можно отключить только
+инварианты, как самую неэффективную часть контракта, потому что инварианты проверяются перед входом в
+любую подпрограмму и после каждого выхода из нее. Наконец, можно вообще отключить все контрактные
+утверждения, оставив только основные проверки (как правило, входных данных). Однако, даже у такой гибкой
+системы есть определенные недостатки, так как в ней выбор утверждений для отключения основан на его
+логическом типе. На практике отключать в первую очередь нужно только те утверждения, которые в самом деле
+существенно влияют на эффективность работы приложения. Назовемм такие проверки /трудоемкими/, /тяжелыми/
+или /жесткими/ (/Hard/). При отключении, например, *всех* предусловий сразу совершенно не учитывается,
+что некоторые из них являются трудоемкими, а некоторые --- нет. Кроме того, в =Eiffel= нет разницы между
+проверками, как частью контрактов, и критическими проверками, которые всегда должны выполняться.
+
+** COMMENT Контекст утверждений
+   :PROPERTIES:
+   :ID:       1d2e69e0-b6dc-4343-8536-fbbb778a0a1e
+   :END:
+
+В аварийной ситуации часто полезно получить конкретные значения переменных которые ее вызвали. Например,
+при возникновении ситуации, описанной условием ~head l >= 0~, может быть получено сообщение вида
+
+: "head l >= 0" failed
+
+Здесь было бы очень полезно подставить в текст условия конкретные значения, которые вызвали аварию,
+например,
+
+: "head [-5.0] >= 0" failed
+
+И все же, нет смысла создавать сложную систему отображения контекста. Проще воспользоваться отладчиком
+GHCi, как описано в разделе [[https://downloads.haskell.org/~ghc/7.4.1/docs/html/users_guide/ghci-debugger.html#ghci-debugger-exceptions][2.5.6. Debugging exceptions]] руководства пользователя. Этот отладчик
+предоставляет не только непосредственный контекст, но и дает развертку всего стека.
+
+** TODO COMMENT Использование макропроцессора C и/или Template Haskell
+  :PROPERTIES:
+  :ID:       8f0478d3-58d2-48c5-b725-33382f552bae
+  :END: 
+
+В [[https://downloads.haskell.org/~ghc/6.12.2/docs/html/users_guide/assertions.html][документации]] по утверждениям рекомендуется использовать средства макропроцессора C:
+
+#+begin_quote
+One way out is to define an extended assert function which also takes a descriptive string to include in
+the error message and perhaps combine this with the use of a pre-processor which inserts the source
+location where assert was used.
+#+end_quote
+
+*** TODO Фрагменты (Slices)
+    :PROPERTIES:
+    :REMIND:   <2013-11-09 Сб 11:22>
+    :END: 
+
+*** TODO Брикеты (Brackets)
+    :PROPERTIES:
+    :REMIND:   <2013-11-09 Сб 11:23>
+    :END: 
+
+* COMMENT План реализации
+
+Определим специальный тип исключения ~Alert~, предназначенный для описания аварийной ситуации. Такое
+определение позволит отделить аварийную ситуацию от общепринятых исключений ошибок (~ErrorCall~) и
+утверждений (~AssertionFailed~).
+
+Для генерации аварийной ситуации мы определим свою версию функции ~alert~, единственным преимуществом
+которой перед стандартной функцией ~error~ будет включение положения в текст сообщения. В перспективе в
+описание аварийной ситуации будет также [[id:508a8a18-bcda-4507-99dc-a757504f702c][добавлен стек вызова]]. До тех пор будет добавлен флаг компиляции,
+который позволит собрать пакет так, что ~alert~ будет просто тематическим синонимом ~error~.
+
+У функции ~assert~ будет пересмотрен тип (сигнатура) и семантика. Во-первых, мы добавим в параметры этой
+функции строку сообщения, что позволит более подробно описывать аварийную ситуацию, которая возникает в
+результате нарушения условия утверждения. Во-вторых, эти утверждения нельзя будет отключать, так как в
+языке нет стандартных средств для управления утверждениями. Такая реализация делает ~assert~ сложнее в
+использовании, однако она станет основой для реализации утверждений более высокого уровня.
+
+Для управления утверждениями определим две функции, ~skip~ и ~exec~, из которых основной является функция
+выключения утверждений ~skip~. Эта функция позволяет включать или выключать только отдельные утверждения,
+поэтому мы определим целый класс /переключателей/ (/Switch/), которые будут синонимами ~skip~ и ~exec~ в
+зависимости от контекста. Реализуем три стандартных переключателя ~basic~, ~contract~ и ~hard~, которые
+будут массово включать или выключать утверждения в соответствии с /режимом контракта/, который будет
+принимать четыре стандартных значения, ~Off~, ~Basic~, ~Complete~ и ~Hard~.
+
+Используя переключатели, определим три типа утверждений более высокого уровня, ~check~, ~requires~ и
+~ensures~. В этой тройке утверждение ~check~ будет определено как базовое с помощью модификатора ~basic~,
+который позволит выключать такие утверждения только при полном выключении системы контрактов. Утверждения
+~requires~ и ~ensures~ определим как утверждения контрактов с помощью модификатора ~contract~, которое
+позволит выключать их проверку в базовом режиме.
+
+В специальных модулях ~Contract.Off~, ~Contract.Basic~, ~Contract.Complete~ И ~Contract.Hard~ определим
+компактные синонимы утверждений для разных режимов, при этом утверждения можно будет включать или
+выключать, просто импортируя соответствующий модуль. После этого соответствующий режим можно будет
+включать и выключать с помощью флагов компиляции. Модуль ~Contract~ определим как синоним модуля
+~Contract.Complete~, который является типичным режимом утверждений при разработке.
+
+Для тестирования введем понятие /ожидаемой/ аварийной ситуации и включим проверку такого ожидания в
+рамках системы тестирования ~QuickCheck~.
+
+Как развитие системы контрактов рассмотрим реализацию функций ~variant~ и ~invariant~. В =Eiffel=
+варианты используются для проверки завершимости циклов. По сути это не логические утверждения, а всего
+лишь ограниченные дискретные значения (чаще всего неотрицательные целые числа). В =Haskell= нет циклов,
+поэтому реализация вариантов имеет свои особенности. Что же касается инвариантов, они (неожиданно!) имеют
+неоднозначную семантику. А именно, логично считать инварианты противоположностью вариантам, то есть, это
+некое значение, которое сохраняется между итерациями цикла или вызовами. Однако, даже в =Eiffel= под
+инвариантами понимаются только логические условия, которые являются комбинациями пред- и постусловий. В
+этом смысле правильнее говорить об универсальном свойстве ~valid~, которое проверяется перед и после
+вызова функции.
+
+Появление монад требует расширение утверждений-контрактов, однако делает их ближе к их императивным
+аналогам. Поэтому отдельно реализуются монадические версии утверждений ~checkM~, ~requiresM~ и ~ensuresM~.
+
+В перспективе необходимо исследовать возможность утверждений о внутренних данных монад.
+
+* COMMENT Управление утверждениями
+
+** COMMENT Монадические контракты
+  :PROPERTIES:
+  :ID:       1ee07feb-6496-444e-b742-3b56924ae2f5
+  :REMIND:   <2013-12-06 Пт 12:09>
+  :END: 
+
+Функции ~check~, ~requires~ и ~ensures~ предоставляют проверку /функциональных/ контрактов. Особенность
+их в том, что они вызываются каскадом поверх вызова реализации соответствующих функций. При работе с
+монадами эти функции можно просто <<поднять>> (/Lift/).
+
+Пусть, например, функция ~sqrtHead~ возвращает значение типа ~m Double~. Если результат нельзя вычислить,
+то возвращается ~fail~, в противном случае гарантируется, что результат, упакованный в значение ~return
+x~, неотрицателен.
+
+#+begin_src haskell :noweb yes :tangle sample/Contract-32.hs
+  import Contract.Complete (ensures)
+  import Control.Monad (liftM)
+  
+  sqrtHead l =
+    liftM $(ensures [| \r -> r >= 0 |]) $
+    if null l
+    then fail "Invalid argument"
+    else return $ sqrt $ head l
+#+end_src
+src_haskell[:results silent]{:load sample/Contract-32.hs}
+
+src_haskell{sqrtHead []} =*** Exception: user error (Invalid argument)=
+src_haskell{sqrtHead [-5.0]} =*** Exception: sample/Contract-32.hs:6:11-37: Postcondition (\r -> r >= 0) is failed=
+
+Заметим, что тут первая аварийная ситуация обработана путем вызова монадического метода ~fail~, а во
+втором случае входной аргумент принят без контроля, и в результате нарушается гарантия неотрицательности
+значения.
+
+В стиле ~do~ удобно использовать /монадические/ версии проверок ~checkM~, ~requiresM~ и
+~ensuresM~. Особенность монадических проверок в том, что они возвращают монады вместо обычных значений.
+
+#+name: Экспорт
+#+name: Экспорт-Internal
+#+begin_src haskell :noweb-sep ",\n"
+  checkM, requiresM, ensuresM
+#+end_src
+
+#+name: Описания
+#+name: Описания-Internal
+#+begin_src haskell :noweb-sep "\n"
+  checkM :: Condition c => c -> ExpQ
+  requiresM :: Condition c => c -> ExpQ
+  ensuresM :: Condition c => c -> ExpQ
+#+end_src
+
+#+name: Определения-Internal
+#+begin_src haskell :noweb-sep "\n\n"
+  checkM cond = 
+    [|
+     \cont -> do
+       $assert 
+         $(expr cond) 
+         (printf "Check %s is failed" $(text cond))
+         return ()
+     |]
+  
+  requiresM cond = 
+    [|
+     \cont -> do
+       $assert 
+         $(expr cond) 
+         (printf "Precondition %s is failed" $(text cond))
+         return ()
+     |]
+  
+  ensuresM cond = 
+    [|
+     \cont -> do
+       $assert
+         ($(expr cond) cont)
+         (printf "Postcondition %s is failed" $(text cond))
+         return cont |]
+#+end_src
+
+Возможно, тут правильнее [[id:0323efa1-186b-4938-90b8-71c1f8c2363a][воспользоваться]] определением промежуточной функции ~check'~, которая принимает
+специальное сообщение об ошибке.
+
+#+name: Определения
+#+begin_src haskell :noweb-sep "\n\n"
+  checkM = contract . Internal.checkM
+
+  requiresM = contract . Internal.requiresM
+
+  ensuresM = contract . Internal.ensuresM
+#+end_src
+
+** TODO COMMENT <<Поднятые>> (Lifted) версии (функции =checkM'=, =requiresM'= и =ensuresM'=)
+   :PROPERTIES:
+   :REMIND:   <2013-12-07 Сб 11:18>
+   :END: 
+** TODO COMMENT Доступ к внутренним частям монад (функции =checkMM=, =requiresMM= и =ensuresMM=)
+   :PROPERTIES:
+   :REMIND:   <2013-12-06 Пт 13:54>
+   :END: 
+
+Все рассмотренные функции используют прямой доступ к переменным в своих выражениях. Однако иногда само
+проверяемое выражение может зависеть, например, от состояния монады ~State~. В этом случае условие также
+лучше поместить в монаду. Тогда проверка условия может быть реализована, например, так.
+
+# name: Определения-Internal
+#+begin_src haskell :noweb-sep "\n\n"
+  checkMM mcond = 
+    [|
+     \cont -> do
+       cond <- $(expr mcond)
+       $assert 
+         cond
+         (printf "Check %s is failed" $(text cond))
+         return ()
+     |]
+  
+  requiresMM mcond = 
+    [|
+     \cont -> do
+       cond <- $(expr mcond)
+       $assert 
+         cond
+         (printf "Precondition %s is failed" $(text cond))
+         return ()
+     |]
+  
+  ensuresMM mcond = 
+    [|
+     \cont -> do
+       cond <- $(expr mcond) cont
+       $assert
+         cond
+         (printf "Postcondition %s is failed" $(text cond))
+         return cont |]
+#+end_src
+
+В этих определениях предполагается, что условие задано в виде монады. Проверка извлекает условие из
+монады и использует его в вызове ~assert~.
+
+В настоящее время этот интерфейс не имеет практического применения, поэтому его полноценная реализация просто отложена.
+
+* COMMENT Тестирование аварийных ситуаций
+  :PROPERTIES:
+  :REMIND:   <2013-12-26 Чт 11:23>
+  :ID:       c855033f-60fb-43a2-b9fb-6561ee890fde
+  :END: 
+
+Исплльзование системы контрактов делает аварийные ситуации <<обычным>> явлением в приложении. Это значит,
+что возникновение аварийных ситуаций можно планировать, а следовательно, необходимо тестировать.
+
+Предполагается, что возникновение /ожидаемой/ (/Expected/) аварийной ситуации может быть предусмотрено с
+помощью функции [[file://cygdrive/d/cache/doc/haskell/QuickCheck-2.4.0.1/dist/doc/html/QuickCheck/Test-QuickCheck-Property.html#v:expectFailure][expectFailure]] из модуля [[file://cygdrive/d/cache/doc/haskell/QuickCheck-2.4.0.1/dist/doc/html/QuickCheck/Test-QuickCheck-Property.html][Test.QuickCheck.Property]]. Однако эта функция принимает только
+тестируемое свойство в качестве аргумента в то время, как аварийная ситуация в общем случае может
+возникнуть при вычислении выражений произвольного типа. Поэтому тестирование возникновения аварийных
+ситуаций с помощью функции ~expectFailure~ требует задания искусственных свойств, которые никогда не
+удовлетворяются и не вычисляются полностью, а единственное их назначение --- вызвать аварийную ситуацию.
+
+Еще один недостаток функции ~expectFailure~ в том, что она не различает свойства, которые нарушаются (то
+есть, возвращают значение ~False~) и свойства, при вычислении которых возникает исключительная
+ситуация. В первом случае ~expectFailure~ действует просто как логическое отрицание свойства и по сути
+бесполезна. Поэтому есть смысл использовать ~expectFailure~ только для описания исключительных ситуаций,
+однако этого все еще недостаточно. В частности, не всякая исключительная ситуация является аварийной, и
+эти случаи иногда важно различать. Возможно, для решения таких задач предназначена функция [[file://cygdrive/d/cache/doc/haskell/QuickCheck-2.4.0.1/dist/doc/html/QuickCheck/Test-QuickCheck-Property.html#v:protect][protect]] из
+модуля [[file://cygdrive/d/cache/doc/haskell/QuickCheck-2.4.0.1/dist/doc/html/QuickCheck/Test-QuickCheck-Property.html][Test.QuickCheck.Property]], однако в целом непонятно, чем она лучше стандартных функций обработки
+исключений, например, [[file://cygdrive/d/opt/ghc/doc/html/libraries/base-4.3.1.0/Control-Exception.html#v:catch][catch]] или [[file://cygdrive/d/opt/ghc/doc/html/libraries/base-4.3.1.0/Control-Exception.html#v:handle][handle]].
+
+Кроме того, работа функции ~expectFailure~ связана с особого рода <<магическим избавлением>> от монады
+~IO~. Даже при тестировании <<чистых>> свойств может возникнуть исключение, обработать которое можно
+только в этой монаде. Известно, что в обычных случаях избавиться от монады ~IO~ невозможно. Однако модуль
+[[file://cygdrive/d/cache/doc/haskell/QuickCheck-2.4.0.1/dist/doc/html/QuickCheck/Test-QuickCheck-Property.html][Test.QuickCheck.Property]] предоставляет функцию [[file://cygdrive/d/cache/doc/haskell/QuickCheck-2.4.0.1/dist/doc/html/QuickCheck/Test-QuickCheck-Property.html#v:morallyDubiousIOProperty][morallyDubiousIOProperty]], которая волшебным образом
+превращает свойство в такой монаде в <<чистое>>. Конечно, в документации к этой функции указано, что она
+может привести к наборам тестов, которые невозможно повторить. И все же, есть надежда, что обработка
+исключительных ситуаций к таким случаям не относится. Мне не удалось разобраться, использует ли
+~expectFailure~ функцию ~morallyDubiousIOProperty~, или же в ней работает другая <<магия>>. Я просто
+воспользовался функцией ~morallyDubiousIOProperty~, чтобы описывать чистые свойства, связанные с
+возникновением аварийных ситуаций.
+
+Однако самая большая проблема использования ~expectFailure~ в том, что она прекращает тестирование
+свойства после первой же запланированной неудачи. Обычно тестовая серия для заданного свойства имеет
+очень большую длину (например, по умолчанию --- 100 тестовых наборов), при этом успешное прохождение
+одного теста не завершает всего процесса до тех пор, пока не будет проверена вся серия. Для свойств,
+описанных с помощью ~expectFailure~ первая же ожидаемая неудача прекращает всю серию тестов. Выходит, что
+роль ~expectFailure~ сводится всего лишь к тому, что она всего лишь гарантирует успешное прохождение
+серии тестов, даже если в ней есть один тест, вызывающий неудачу. При этом, однако, выполнение всей серии
+тестов прекращается сразу же после обнаружения такого тестового набора. Получается, что вся тестовая
+последовательность, несмотря на ее успешность, оказывается короче ожидаемой. Это представляется
+принципиально неправильным. <<Хорошая>> обработка ожидаемой неудачи предполагает продолжение
+тестирования, чтобы проверить возникновение ожидаемой неудачи на как можно большем числе наборов.
+
+** Ожидаемые аварийные ситуации
+   :PROPERTIES:
+   :REMIND:   <2013-12-27 Пт 15:13>
+   :ID:       bd2b4fb3-2a1c-4234-83a4-77ae45431fc8
+   :END:
+
+Чтобы устранить перечисленные недостатки ~expectFailure~, система контрактов предоставляет функцию
+~expectAlert~, которая предоставляет свойство, удовлетворительное в том и только в том случае, когда
+вычисление аргумента этой фугкции приводит к возникновению аварийной ситуации.
+
+#+name: Экспорт
+#+name: Экспорт-Internal
+#+begin_src haskell :noweb-sep ",\n"
+  expectAlert
+#+end_src
+
+#+name: Определения-Internal
+#+begin_src haskell :noweb-sep "\n\n"
+  expectAlert :: t -> Property
+  expectAlert expr = 
+    morallyDubiousIOProperty $
+    handle (\(Alert m) -> return $ length m > 0) $
+    evaluate $ expr `seq` False
+#+end_src
+
+Логика вычисления функции ~expectAlert~ заключается в подвыражении ~expr `seq` False~, то есть, просто в
+вычислении выражения, заданного аргументом функции. Если это выражение вычисляется без возникновения
+аварийной ситуации, то свойство оказывается ложным независимо от полученного результата. Свойство может
+быть проверено успешно [[id:104c9a2d-1375-4043-9ffe-93b64852391b][только тогда]], когда при вычислении аргумента возникнет искличительная ситуация
+специального типа ~Alert~. Обработчик, заданный с помощью функции ~handle~ перехватывает все исключения
+этого типа и возвращает истину в том случае, если строка с текстом сообщения, переданного через
+исключение ~Alert~, не пуста. Удивительно здесь то, что если условие ~length m > 0~ переформулировать в
+более короткой форме ~not $ null m~, то по не совсем понятным причинам (но, скорее всего, из-за
+отложенного характера вычислений) строковое выражение, соответствующее сообщению ~m~, просто не
+вычисляется. В результате индикатор покрытия тестов показывает, что соответствующая часть генератора
+аварийной ситуации просто не тестируется (см. также [[id:8fadc824-033a-4a37-9191-3e8cf6aa6bd7][Принудительное вычисление сообщения в аварийной
+ситуации]]).
+
+В целом все свойство оказывается заключенным в монаду ~IO~, от которой мы избавляемся с помощью вызова
+<<магической>> функции ~morallyDubiousIOProperty~ (см. также
+[[id:62641a00-8c9a-4545-8e9a-253fda3ba35a][Заменить ~morallyDubiousIOProperty~ на ~monadicIO . run~]]).
+
+Для демонстрации возможностей ~expectAlert~ протестируем функцию ~sqrtHead~ для различных случайных
+значений аргумента. Если оба условия контракта выполняются, то результат вычисления этой функции будет
+обязательно больше или равен нулю, в противном случае должна возникнуть аварийная ситуация, вызванная
+нарушением контракта.
+
+#+begin_src haskell :noweb yes :tangle sample/Contract-36.hs
+  <<Флаги-примеров>>
+
+  import Contract.Complete (requires, expectAlert)
+  import Test.QuickCheck (Property, property, quickCheck)
+  
+  sqrtHead :: [Double] -> Double
+  sqrtHead l = 
+    $(requires [| not $ null l |])
+    $(requires [| head l >= 0 |])
+    sqrt $ head l
+  
+  prop_plus :: [Double] -> Property
+  prop_plus l
+    | not (null l) && (head l >= 0) = property $ sqrtHead l >= 0
+    | otherwise = expectAlert $ sqrtHead l
+
+  main :: IO ()
+  main = quickCheck prop_plus
+#+end_src
+src_haskell[:results silent]{:load sample/Contract-36.hs}
+
+src_haskell{main} =+++ OK, passed 100 tests.=
+
+Однако, если контракты предусловий в определении ~sqrtHead~ будут пропущены, то тестирование того же
+самого свойства будет приводить к неудаче.
+
+#+begin_src haskell :noweb yes :tangle sample/Contract-37.hs
+  <<Флаги-примеров>>
+
+  import Contract.Complete (expectAlert)
+  import Test.QuickCheck (Property, property, quickCheck)
+  
+  sqrtHead :: [Double] -> Double
+  sqrtHead l = sqrt $ head l
+  
+  prop_plus :: [Double] -> Property
+  prop_plus l
+    | not (null l) && (head l >= 0) = property $ sqrtHead l >= 0
+    | otherwise = expectAlert $ sqrtHead l
+
+  main :: IO ()
+  main = quickCheck prop_plus
+#+end_src
+src_haskell[:results silent]{:load sample/Contract-37.hs}
+
+src_haskell{main} =Exception: 'Prelude.head: empty list' (after 1 test):  
+
+** Контрактные свойства
+   :PROPERTIES:
+   :REMIND:   <2013-12-27 Пт 15:13>
+   :ID:       656bfe28-dd28-40ac-8dda-7a2b59b547f3
+   :END: 
+
+Очень часто тестируемое свойство требует определенного предусловия, в противном случае оно не
+выполняется. Обычно для описания таких свойств используется оператор
+[[file://cygdrive/d/cache/doc/haskell/QuickCheck-2.4.0.1/dist/doc/html/QuickCheck/Test-QuickCheck-Property.html#v:-61--61--62-
+[(==>)]] (см. также раздел [[id:772cbbba-a98a-43e4-91ef-f82747f41bf5][Реализовать булеву импликацию
+(=(==>)=)]]) из модуля [[file://cygdrive/d/cache/doc/haskell/QuickCheck-2.4.0.1/dist/doc/html/QuickCheck/Test-QuickCheck-Property.html][Test.QuickCheck.Property]], который по сути похож на логическую импликацию, у которой
+истинность прецедента определяет осмысленность антецедента. Если же предусловие такой импликации ложно,
+то весь тест в целом считается /отвергнутым/ или /отброшенным/ (/Discarded/). Отброшенные тесты в
+процессе тестирования учитываются отдельно наравне с /успешными/ (/Successful/) и /неудачными/
+(/Failed/), и если отброшенных тестов слишком много (по умолчанию --- больше 500), то возникает особый
+результат тестирования --- /незавершенное/ (/Giving Up/) тестирование. Понять смысл такого результата не
+очень просто. С одной стороны, все подходящие (то есть, не отброшенные) тесты были пройдены. С другой
+стороны, таких тестов оказалось слишком мало. Можно ли такое незавершенное тестирование в целом считать
+удачным?
+
+Той же самой импликации свойств можно придать иной смысл. Когда предусловие такого свойства истинно, то
+для успешного прохождения теста его антецедент должен быть удовлетворен. Однако, если прецедент свойства
+ложен, то, в отличие от оператора из модуля [[file://cygdrive/d/cache/doc/haskell/QuickCheck-2.4.0.1/dist/doc/html/QuickCheck/Test-QuickCheck-Property.html][Test.QuickCheck.Property]], при тестировании такого свойства
+*обязательно ожидается* возникновение аварийной ситуации.
+
+Для удобства система контрактов предоставляет оператор импликации ~(==>!)~ (возможны также варианты
+~(=>!)~ и ~(!=>!)~). Восклицательный знак тут напоминает о том, что если прецедент ложен, то при
+вычислении антецедента обязательно возникнет аварийная ситуация.
+
+#+name: Экспорт
+#+name: Экспорт-Internal
+#+begin_src haskell :noweb-sep ",\n"
+  (==>!)
+#+end_src
+
+#+name: Определения-Internal
+#+begin_src haskell :noweb-sep "\n\n"
+  (==>!) :: Testable t => Bool -> t -> Property
+  pre ==>! post = if pre then property post else expectAlert post
+  infixr 0 ==>!
+#+end_src
+
+Теперь при задании свойства ~prop_plus~ для тестирования функции ~sqrtHead~ нам не нужно различать случаи
+обычного выполнения и аварийные ситуации.
+
+#+begin_src haskell :noweb yes :tangle sample/Contract-38.hs
+  <<Флаги-примеров>>
+
+  import Contract.Complete (requires, (==>!))
+  import Test.QuickCheck (Property, quickCheck)
+  
+  sqrtHead :: [Double] -> Double
+  sqrtHead l = 
+    $(requires [| not $ null l |])
+    $(requires [| head l >= 0 |])
+    sqrt $ head l
+  
+  prop_plus :: [Double] -> Property
+  prop_plus l = not (null l) && (head l >= 0) ==>! sqrtHead l >= 0
+
+  main :: IO ()
+  main = quickCheck prop_plus
+#+end_src
+src_haskell[:results silent]{:load sample/Contract-38.hs}
+
+src_haskell{main} =+++ OK, passed 100 tests.=
+
+Свойства, заданные с помощью описанной нами импликации будем называть /контрактными/ (/Contract
+Property/). В отличие от отвергаемых свойств правильно построенное контрактное свойство всегда
+тестируется успешно. Однако в случае, когда тестирование отвергаемых условий оказывается незавершенным,
+при тестировании контрактных свойств число тестов для обычного вычисления (без аварийной ситуации) может
+оказаться недостаточным, и мы об этом не узнаем. Здесь может помочь тщательная оценка покрытия тестами
+исходного кода, но общепринятая система =HPC= [[id:6e31012d-17cf-41b5-8f6f-cf6d65c4ce62][не дает]] статистики по исполнению различных частей кода, что
+также может привести к проблемам.
+
+В случае, если описанное свойство дает сильный перекос в сторону тестирования аварийных ситуаций, есть
+смысл разделить такое свойство на два --- для успешного вычисления и аварийной ситуации, после чего
+использовать специализированные генераторы тестовых наборов для каждого случая.
+
+** Реализация логической импликации (=(==>)=)
+   :PROPERTIES:
+   :ID:       32bfd57d-ed2e-46f5-b8b1-d33db08452e3
+   :REMIND:   <2014-02-03 Пн 14:03>
+   :END:
+
+Вообще говоря, логическая импликация является фундаментальной операцией и должна быть реализована в
+модуле [[file://cygdrive/d/opt/ghc/doc/html/libraries/base-4.3.1.0/Data-Bool.html][Data.Bool]] наряду с другими логическими операциями. Однако в настоящее время это не так, и
+логическую импликацию пришлось реализовать отдельно. Для простоты эта реализация включена в модуль
+~Contract~.
+
+#+name: Экспорт
+#+name: Экспорт-Internal
+#+begin_src haskell :noweb-sep ",\n"
+  (==>)
+#+end_src
+
+#+name: Определения-Internal
+#+begin_src haskell :noweb-sep "\n\n"
+  (==>) :: Bool -> Bool -> Bool
+  False ==> _ = True
+  True ==> post = post
+  infixr 0 ==>
+#+end_src
+
+* TODO COMMENT Проблемы и недоработки
+  :PROPERTIES:
+  :REMIND:   <2013-12-26 Чт 11:22>
+  :END: 
+** TODO Выводить конкретный тип исключения
+  :PROPERTIES:
+  :ID:       87e5d625-fe0b-4841-a496-f67ec2c34e2f
+  :END:
+
+src_haskell{:module Control.Exception}
+
+Сейчас заголовок сообщения о необработанном исключении содержит просто слово =Exception=:
+
+src_haskell{throw $ ErrorCall "Alarm"} =*** Exception: Alarm=
+src_haskell{throw $ AssertionFailed "Alarm"} =*** Exception: Alarm=
+
+Было бы удобно, если бы этот заголовок содержал конкретный тип необработанного исключения:
+
+src_haskell{throw $ ErrorCall "Alarm"} =*** ErrorCall: Alarm=
+src_haskell{throw $ AssertionFailed "Alarm"} =*** AssertionFailed: Alarm=
+
+Похоже, для этого придется поменять поведение ядра системы, хотя правильнее было бы определить сообщение
+как метод класса =Exception=, например:
+
+#+begin_src haskell
+  class Exception where
+    message:: e -> String
+    
+  instance Exception ErrorCall where
+    message (ErrorCall t) = "*** ErrorCall: " ++ t
+    
+  instance Exception AssertionFailed where
+    message (AssertionFailed t) = "*** AssertionFailed: " ++ t
+#+end_src
+
+Это только образец решения, возможно, правильнее определить тип исключения =Alert= и два конструктора
+=ErrorCall= и =AssertionFailed= для него. Однако это (пока) не нужно.
+
+В настоящее время =Alert= является самостоятельным исключением верхнего уровня, хотя, может быть, в
+дальнейшем, есть смысл определить его как разновидность (подтип) исключения =ErrorCall=. Однако в этом
+случае желательно также првести к общему типу также исключение =AssertionFailed=. Возможно, что все три
+типа исключений (=Alert=, =ErrorCall= и =AssertionFailed=) являются всего лишь разновидностями одного
+(базового) исключения, а может быть, некоторые из них избыточны. Определить все это можно только в ходе
+практического использования системы контрактов.
+
+** TODO Добавить в ~alert~ стек вызова
+:PROPERTIES:
+:ID:       508a8a18-bcda-4507-99dc-a757504f702c
+:END:
+
+См. реализацию ~error~ в [[https://downloads.haskell.org/~ghc/8.0.1-rc1/docs/html/libraries/base-4.9.0.0/src/GHC-Err.html][Err]].
+
+** TODO Добавить термин /выключатель/
+   :PROPERTIES:
+   :REMIND:   <2013-11-10 Нд 13:43>
+   :END: 
+** TODO Как разделить и описать списки импорта и списки экспорта?
+   :PROPERTIES:
+   :REMIND:   <2013-11-12 Вв 10:03>
+   :END: 
+** TODO Выводить признак утверждения контракта в сообщении
+  :PROPERTIES:
+  :REMIND:   <2013-11-12 Вв 10:38>
+  :ID:       0323efa1-186b-4938-90b8-71c1f8c2363a
+  :END: 
+
+Сейчас сообщение проверки выводит =Check ... is failed= для любого утверждения. Желательно, чтобы предусловия и
+постусловия выводили =Precondition ... is failed= и =Postcondition ... is failed= соответственно.
+
+Проблема была временно решена за счет частичного повторения кода при реализации утверждений разных типов. Правильно было
+бы ввести промежуточную функцию =check'=, которая реализует общую часть этих утверждений.
+
+Заметим, например, что сейчас в определении функции [[id:1ee07feb-6496-444e-b742-3b56924ae2f5][ensuresM]] использован [[(check)][вызов]] ~assert~ только лишь для
+того, чтобы обеспечить удобное сообщение об ошибке.
+
+** TODO Описать списки импорта из ~Internal~
+   :PROPERTIES:
+   :REMIND:   <2013-11-19 Вв 11:13>
+   :END: 
+
+** TODO Форматирование выражений
+  :PROPERTIES:
+  :REMIND:   <2013-11-19 Вв 15:23>
+  :ID:       f91dee4c-aaba-4f9c-b300-51089dae2230
+  :END: 
+
+В настоящее время для вывода выражений используется [[id:ca1ebf13-e840-4386-b173-7e3a3cb514ee][промежуточное решение]], так как попытка реализовать свой собственный
+вывод привела к [[id:efbc71ce-7554-4fc8-8aee-5e4e70992c17][сложностям при выводе скобок]]. Возможно, нет необходимости тянуть все содержимое модулей =Ppr= и
+=PprLib=, но их реализация настолько запутана, что я не смог выделить только необходимую часть.
+
+Возможно, именно здесь пригодилась бы возможность [[id:dcb642d9-0df4-41de-9a84-0e5fba0931aa][переопределения]] ~Name~ как экземпляра стандартного
+класса ~Show~.
+
+** TODO Оформить сокращенный реэкспорт из модуля ~Internal~
+   :PROPERTIES:
+   :REMIND:   <2013-11-21 Чт 11:01>
+   :END: 
+
+** TODO Проблемы стадии компиляции
+  :PROPERTIES:
+  :REMIND:   <2013-11-30 Сб 14:21>
+  :ID:       b6b594a0-545d-4b12-b5e5-6b761e1d936c
+  :END: 
+
+Пусть тип ~Double~ определен как [[<%D0%9F%D1%80%D0%B8%D0%BC%D0%B5%D1%80%D1%8B-%D1%8D%D0%BA%D0%B7%D0%B5%D0%BC%D0%BF%D0%BB%D1%8F%D1%80%D0%BE%D0%B2-Valid-Double][экземпляр классса ~Valid~]]. Определим функцию ~vid~ как контракт для
+тривиальной функции ~id~ таким образом, что она будет требовать корректный аргумент и гарантировать при
+этом корректный результат.
+
+#+begin_src haskell :noweb yes :tangle sample/Contract-33.hs
+  import Contract.Complete (Valid, valid, requires, ensures)
+  
+  <<Примеры-экземпляров-Valid-Double>>
+  
+  vid :: Double -> Double
+
+  vid n =
+    $(requires [| valid n |]) $
+    $(ensures [| \r -> valid r |]) $
+    id n
+#+end_src
+src_haskell{:load sample/Contract-33.hs} =[3 of 5]=
+
+При компиляции этого примера возникает ошибка
+
+#+begin_quote
+sample\Contract-33.hs:10:17:
+    GHC stage restriction: instance for `Valid Double'
+      is used in a top-level splice or annotation,
+      and must be imported, not defined locally
+    In the Template Haskell quotation [| valid n |]
+    In the first argument of `requires', namely `[| valid n |]'
+    In the expression: requires [| valid n |]
+#+end_quote
+
+Простое промежуточное решение тут может быть в том, чтобы выделить определение экземпляра =Valid= в
+отдельный модуль, который экспортирует определение соответствующей функции =valid=. Однако непонятно,
+почему эта ошибка возникает только для предложения =requires=? В самом деле, следующий пример ошибок
+компиляции не вызывает:
+
+#+begin_src haskell :noweb yes :tangle sample/Contract-34.hs
+  import Contract.Complete (Valid, valid, requires, ensures)
+  
+  <<Примеры-экземпляров-Valid-Double>>
+  
+  vid :: Double -> Double
+
+  vid n =
+    $(ensures [| \r -> valid r |]) $
+    id n
+#+end_src
+src_haskell{:load sample/Contract-34.hs}
+
+Тем не менее, такое поведение не связано с особенностями реализации функции =ensures=. Достаточно добавить в проверку
+гарантии валидность аргумента функции, и ошибка возникнет снова, например:
+
+#+begin_src haskell :noweb yes :tangle sample/Contract-35.hs
+  import Contract.Complete (Valid, valid, requires, ensures)
+  
+  <<Примеры-экземпляров-Valid-Double>>
+  
+  vid :: Double -> Double
+
+  vid n =
+    $(ensures [| \r -> valid r && valid n |]) $
+    id n
+#+end_src
+src_haskell{:load sample/Contract-35.hs} =[3 of 5]=
+
+Этот пример можно выделить [[id:73f6813e-215c-49b3-a513-81adb169d5a1][в чистом виде]].
+
+** TODO Функции для тестирования ожидаемых исключительных, но не аварийных ситуаций
+   :PROPERTIES:
+   :REMIND:   <2013-12-27 Пт 13:40>
+   :ID:       104c9a2d-1375-4043-9ffe-93b64852391b
+   :END: 
+
+Заметим, что любые другие исключения, кроме в том числе, =ErrorCall= и =AssertionFailed= не обрабатываются и в
+дальнейшем воспринимаются тестами на основе =expectAlert= как неудача. Возможно, что для обработки таких ситуаций
+желательно предусмотреть специальные функции типа =expectError= или даже =expectException(Just)=, которые будут
+перехватывать все или специально отобранные виды исключений. Однако в настоящее время это не представляется
+целесообразным.
+
+** TODO Заменить =morallyDubiousIOProperty= на =monadicIO . run=
+   :PROPERTIES:
+   :REMIND:   <2013-12-31 Вв 12:33>
+   :ID:       62641a00-8c9a-4545-8e9a-253fda3ba35a
+   :END: 
+
+См. [[id:bd2b4fb3-2a1c-4234-83a4-77ae45431fc8][Ожидаемые аварийные ситуации]]
+
+Модуль [[file://cygdrive/d/cache/doc/haskell/QuickCheck-2.4.0.1/dist/doc/html/QuickCheck/Test-QuickCheck-Monadic.html][Test.QuickCheck.Monadic]] предоставляет ряд средств для тестирования монад, в том числе, значений в
+монаде ~IO~. К сожалению, модуль практически не документирован, что создает определенные сложности в его
+использовании.
+
+При [[id:c855033f-60fb-43a2-b9fb-6561ee890fde][тестировании аварийных ситуаций]] указывалась сложность в том, что для получения обычного свойства,
+описывающего аварийную ситуазию требуется обработка исключений, которая возможна только в монаде
+=IO=. Как промежуточное решение, было предложено использовать <<магическую>> функцию
+~morallyDubiousIOProperty~, которая позволяет получить обычное свойство из результата вычисления в монаде
+=IO=. Предполагается, что средства модуля [[file://cygdrive/d/cache/doc/haskell/QuickCheck-2.4.0.1/dist/doc/html/QuickCheck/Test-QuickCheck-Monadic.html][Test.QuickCheck.Monadic]] позволяют сделать то же самое
+<<правильно>>. В частности, функция =run= позволяет получить значение типа =PropertyM=, которое затем с
+помощью функции =monadicIO= может быть преобразовано в обычное свойство типа =Property=.
+
+Однако такая замена, несмотря на ее корректность с точки зрения компиляции, почему-то работает неверно. В
+частности, следующий фрагмент кода, по идее, должен всегда заканчиваться неуспешно, так как даже при
+перехвате исключения все-равно возвращается значение ложь.
+
+#+begin_src haskell
+  expectAlert :: t -> Property
+  expectAlert expr = 
+    -- morallyDubiousIOProperty $
+    monadicIO $ run $
+    handle (\_ -> return False) $
+    seq expr $ return False
+#+end_src
+
+Комментарием здесь показано обычное использование <<магической>> функции =morallyDubiousIOProperty=. Тем
+не менее, любое свойство, описанное с помощью такого определения =expectAlert= будет обрабатываться
+успешно. Похоже, проблема в том, что комбинация =monadicIO . run= где-то <<глотает>> результат обработки
+исключения. Ситуация требует дополнительного исследования.
+
+** TODO Принудительное вычисление сообщения в аварийной ситуации
+   :PROPERTIES:
+   :REMIND:   <2013-12-31 Вв 12:58>
+   :ID:       8fadc824-033a-4a37-9191-3e8cf6aa6bd7
+   :END: 
+
+См. [[id:bd2b4fb3-2a1c-4234-83a4-77ae45431fc8][Ожидаемые аварийные ситуации]]
