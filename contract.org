@@ -9,11 +9,12 @@
 отдельных местах приложения. Полноценные контракты, реализованные, например, в =Eiffel=, являются
 регулярной системой проверок, которые задаются в описании поведения любой достаточно сложной
 функции. Поэтому кроме простых /проверок/ (/Check/), которые являются дальнейшим развитием утверждений и
-могут встретиться в любом месте кода, вводятся также /требования/ (/Requirement/), /гарантии/ (Ensurance)
-и /инварианты/ (/Invariant/). Требования можно также назвать /предусловиями/ (/Precondition/), а гарантии
---- /постусловиями/ (/Postcondition/). Предусловия проверяются перед вызовом функции, постусловия --- в
-конце, а инварианты вызываются в обоих случаях. Совокупность требований, гарантий и инвариантов обычно
-называется /контрактом/, который определяет порядок взаимодействия функции с внешним миром.
+могут встретиться в любом месте кода, вводятся также /требования/ (/Requirement/), /гарантии/
+(/Ensurance/) и /инварианты/ (/Invariant/). Требования можно также назвать /предусловиями/
+(/Precondition/), а гарантии --- /постусловиями/ (/Postcondition/). Предусловия проверяются перед вызовом
+функции, постусловия --- в конце, а инварианты вызываются в обоих случаях. Совокупность требований,
+гарантий и инвариантов обычно называется /контрактом/, который определяет порядок взаимодействия функции
+с внешним миром.
 
 Кроме того, с программированием по контракту тесно связаны различные способы аварийного завершения
 приложения. В =C= для аварийного завершения обычно используется вызов функции ~exit~, в =C++= к этому
@@ -88,11 +89,11 @@
 #+end_src
 
 #+begin_src haskell :results verbatim
-  :load Contract/sample/Contract.1
+  :load haskell-contract/sample/Contract.1
 #+end_src
 
 #+RESULTS:
-: [1 of 1] Compiling Main             ( Contract/sample/Contract.1.hs, interpreted )
+: [1 of 1] Compiling Main             ( haskell-contract/sample/Contract.1.hs, interpreted )
 : Ok, one module loaded.
 
 #+begin_src haskell
@@ -128,11 +129,11 @@
 #+end_src
 
 #+begin_src haskell :results verbatim
-  :load Contract/sample/Contract.2
+  :load haskell-contract/sample/Contract.2
 #+end_src
 
 #+RESULTS:
-: [1 of 1] Compiling Main             ( Contract/sample/Contract.2.hs, interpreted )
+: [1 of 1] Compiling Main             ( haskell-contract/sample/Contract.2.hs, interpreted )
 : Ok, one module loaded.
 
 По сути, эта функция должна выдавать следующее значение для своего аргумента. Однако предположим, что
@@ -150,7 +151,7 @@
 : *** Exception: Prelude.undefined
 : CallStack (from HasCallStack):
 :   error, called at libraries/base/GHC/Err.hs:79:14 in base:GHC.Err
-:   undefined, called at Contract/sample/Contract.2.hs:3:10 in main:Main
+:   undefined, called at haskell-contract/sample/Contract.2.hs:3:10 in main:Main
 
 #+begin_src haskell
   next 0
@@ -160,7 +161,7 @@
 : *** Exception: Prelude.undefined
 : CallStack (from HasCallStack):
 :   error, called at libraries/base/GHC/Err.hs:79:14 in base:GHC.Err
-:   undefined, called at Contract/sample/Contract.2.hs:8:20 in main:Main
+:   undefined, called at haskell-contract/sample/Contract.2.hs:8:20 in main:Main
 
 Мы видим, что в случае возникновения аварийной ситуации само сообщение ~*** Exception: Prelude.undefined~
 совершенно неинформативно. Оно только сообщает, что где-то в коде была вызвана функция ~undefined~, но
@@ -178,11 +179,11 @@
 #+end_src
 
 #+begin_src haskell :results verbatim
-  :load Contract/sample/Contract.3
+  :load haskell-contract/sample/Contract.3
 #+end_src
 
 #+RESULTS:
-: [1 of 1] Compiling Main             ( Contract/sample/Contract.3.hs, interpreted )
+: [1 of 1] Compiling Main             ( haskell-contract/sample/Contract.3.hs, interpreted )
 : Ok, one module loaded.
 
 #+begin_src haskell
@@ -190,15 +191,14 @@
 #+end_src
 
 #+RESULTS:
-: *** Exception: Contract/sample/Contract.3.hs:(1,1)-(2,10): Non-exhaustive patterns in function next
+: *** Exception: haskell-contract/sample/Contract.3.hs:(1,1)-(2,10): Non-exhaustive patterns in function next
 
 #+begin_src haskell
   next 0
 #+end_src
 
 #+RESULTS:
-: <interactive>:1258:1-4: error:
-:     Variable not in scope: next :: t0 -> t
+: *** Exception: haskell-contract/sample/Contract.3.hs:(1,1)-(2,10): Non-exhaustive patterns in function next
 
 Здесь мы тоже получаем аварийную ситуацию, описанную исключением. Удивительно, но здесь, в отличие от
 вызова ~undefined~, не показан стек вызова. Вместо этого в тексте сообщения появляется фрагмент
@@ -225,11 +225,11 @@
 #+end_src
 
 #+begin_src haskell :results verbatim
-  :load Contract/sample/Contract.4.hs
+  :load haskell-contract/sample/Contract.4.hs
 #+end_src
 
 #+RESULTS:
-: [1 of 1] Compiling Main             ( Contract/sample/Contract.4.hs, interpreted )
+: [1 of 1] Compiling Main             ( haskell-contract/sample/Contract.4.hs, interpreted )
 : Ok, one module loaded.
 
 #+begin_src haskell
@@ -239,7 +239,7 @@
 #+RESULTS:
 : *** Exception: next for -1 is not defined
 : CallStack (from HasCallStack):
-:   error, called at Contract/sample/Contract.4.hs:3:8 in main:Main
+:   error, called at haskell-contract/sample/Contract.4.hs:3:8 in main:Main
 
 #+begin_src haskell
   next 0
@@ -248,7 +248,7 @@
 #+RESULTS:
 : *** Exception: Unexpected value 0
 : CallStack (from HasCallStack):
-:   error, called at Contract/sample/Contract.4.hs:8:18 in main:Main
+:   error, called at haskell-contract/sample/Contract.4.hs:8:18 in main:Main
 
 Здесь мы попытались разделить ситуации, задав для каждой из них свой собственный вид сообщения с помощью
 вызова стандартной функции ~error~ из модуля [[https://downloads.haskell.org/~ghc/8.0.1-rc1/docs/html/libraries/base-4.9.0.0/src/GHC-Err.html][Err]]. Раньше эта функция просто генерировала исключение
@@ -279,7 +279,7 @@
 Вместо того, чтобы изменять определение стандартной функции ~error~, поведение которой для многих уже
 стало привычным, при реализации модуля ~Contract~ мы определим новую функцию ~alert~, которая отличается от
 ~error~ тем, что включает в сообщение специально отформатированную информацию о положении аварийной
-ситуации. Позднее можно будет [[id:508a8a18-bcda-4507-99dc-a757504f702c][добавить в ~alert~ стек вызова]].
+ситуации. Позднее можно будет [[id:508a8a18-bcda-4507-99dc-a757504f702c][добавить ~alert~ в стек вызова]].
 
 ** Утверждения
 :PROPERTIES:
@@ -341,11 +341,11 @@
 #+end_src
 
 #+begin_src haskell :results verbatim
-  :load Contract/sample/Contract.5.hs
+  :load haskell-contract/sample/Contract.5.hs
 #+end_src
 
 #+RESULTS:
-: [1 of 1] Compiling Main             ( Contract/sample/Contract.5.hs, interpreted )
+: [1 of 1] Compiling Main             ( haskell-contract/sample/Contract.5.hs, interpreted )
 : Ok, one module loaded.
 
 #+begin_src haskell
@@ -355,7 +355,7 @@
 #+RESULTS:
 : *** Exception: Argument list in sqrtHead is empty
 : CallStack (from HasCallStack):
-:   error, called at Contract/sample/Contract.5.hs:1:15 in main:Main
+:   error, called at haskell-contract/sample/Contract.5.hs:1:15 in main:Main
 
 #+begin_src haskell
   sqrtHead [-5.0]
@@ -364,7 +364,7 @@
 #+RESULTS:
 : *** Exception: Head element -5.0 of argument list in sqrtHead is negative
 : CallStack (from HasCallStack):
-:   error, called at Contract/sample/Contract.5.hs:4:8 in main:Main
+:   error, called at haskell-contract/sample/Contract.5.hs:4:8 in main:Main
 
 Здесь проверки аварийных ситуаций запутывают основной код приложения. Чтобы упростить описание,
 воспользуемся /утверждениями/ (/Assert/), которые реализованы в =Haskell= в виде стандартной функции
@@ -382,11 +382,11 @@
 #+end_src
 
 #+begin_src haskell :results verbatim
-  :load Contract/sample/Contract.6.hs
+  :load haskell-contract/sample/Contract.6.hs
 #+end_src
 
 #+RESULTS:
-: [1 of 1] Compiling Main             ( Contract/sample/Contract.6.hs, interpreted )
+: [1 of 1] Compiling Main             ( haskell-contract/sample/Contract.6.hs, interpreted )
 : Ok, one module loaded.
 
 #+begin_src haskell
@@ -396,7 +396,7 @@
 #+RESULTS:
 : *** Exception: Assertion failed
 : CallStack (from HasCallStack):
-:   assert, called at Contract/sample/Contract.6.hs:4:3 in main:Main
+:   assert, called at haskell-contract/sample/Contract.6.hs:4:3 in main:Main
 
 #+begin_src haskell
   sqrtHead [-5.0]
@@ -405,7 +405,7 @@
 #+RESULTS:
 : *** Exception: Assertion failed
 : CallStack (from HasCallStack):
-:   assert, called at Contract/sample/Contract.6.hs:5:3 in main:Main
+:   assert, called at haskell-contract/sample/Contract.6.hs:5:3 in main:Main
 
 Логическое выражение, заданное в утверждении назовем /условием/ (/Condition/, ~Cond~). Значения
 аргументов, при которых условие утверждения корректно (или /удовлетворено/), назовем /областью
@@ -547,7 +547,7 @@ Control.Exception to make use assert in your code.
 Разобраться в этом нагромождении проверочных систем мне пока что не удалось, поэтому в модуле ~Contract~
 реализована еще одна версия утверждений с описанием.
 
-** COMMENT Управление утверждениями
+** Управление утверждениями
    :PROPERTIES:
    :ID:       f3936356-da7d-4f2b-aaaf-f4f36f963b31
    :END: 
@@ -619,7 +619,7 @@ assert pred e will be rewritten to e. You can also disable assertions using the 
 что некоторые из них являются трудоемкими, а некоторые --- нет. Кроме того, в =Eiffel= нет разницы между
 проверками, как частью контрактов, и критическими проверками, которые всегда должны выполняться.
 
-** COMMENT Контекст утверждений
+** Контекст утверждений
    :PROPERTIES:
    :ID:       1d2e69e0-b6dc-4343-8536-fbbb778a0a1e
    :END:
@@ -661,7 +661,7 @@ location where assert was used.
     :REMIND:   <2013-11-09 Сб 11:23>
     :END: 
 
-* COMMENT План реализации
+* План реализации
 
 Определим специальный тип исключения ~Alert~, предназначенный для описания аварийной ситуации. Такое
 определение позволит отделить аварийную ситуацию от общепринятых исключений ошибок (~ErrorCall~) и
